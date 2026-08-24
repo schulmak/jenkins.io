@@ -1,0 +1,48 @@
+---
+layout: post
+title: "Daily Life as a Jenkins Administrator"
+tags:
+- community
+- user-experience
+- Jenkins maintenance
+authors:
+- schulmak
+description: "Daily life as a Jenkins administrator: Jenkins Kubernetes nodes - Part 2"
+opengraph:
+  image: /images/post-images/2026/jenkins_blog_admin.png
+---
+== Jenkins Kubernetes setup
+
+As a team, we introduced Jenkins Kubernetes for every user a few months ago. Our goal was to make it easy to get started with Jenkins — no need for an agent.
+We prepared guides on how to use it, which tools are already included in the image used by the pod (maintained by us). A few nodes are always ready, and Azure autoscaling is active for more. The pod YAML is configured and maintained by us in the Jenkins cloud configuration.
+For higher security, we wrapped the Jenkins pods in a Docker-in-Docker environment, which leaves the user with full root permissions within the pod without any escape possibilities.
+
+== Example agent declaration
+
+[source,groovy]
+----
+agent {
+    kubernetes {
+        // Kubernetes cloud environment
+        cloud 'cluster-<environment>'
+        // Use predefined basebuild kubernetes template
+        inheritFrom 'basebuild'
+    }
+}
+----
+
+== User story that drove us crazy
+Before the big release, we ran a few tests on our own and with a few test users. Everything looked good so far; there were a few smaller issues, but nothing to worry about. We announced it and let people try it out. Many jumped on it, and we could fix a few more things (mostly related to internal policies and less about Jenkins or Kubernetes). One user later told us that one of his jobs had failed over the weekend. One job, three environments, the same cron trigger: Production and Quality were successful, while Development failed; the following weekend, one job succeeded and two others failed. The job itself did not do much. It executed five calls one after another and waited for a response from the target system. Each call took between 15 and 20 minutes. The one thing that stood out was that, at the same time, many other users were also starting their jobs (cron 24:00).
+
+A few weekends passed, and we still had the same issue. We could not find any reason for the failures.
+
+In the end, we contacted our internal Kubernetes team and discussed the case with them.
+It turned out to be the shutdownGracePeriod value of the nodes that caused the job to be aborted. During midnight and 1:00 a.m., many users started many jobs, and so many nodes were created that their jobs often landed on new autoscaled nodes, which would scale down if the pods on the node were inactive or had low usage. Because the job had an active runtime of one minute but a total runtime of one hour, Kubernetes auto-provisioned the node and aborted the job. Sometimes the jobs landed on a node that would not auto-provision; sometimes another job ran with a similar runtime; and sometimes it was the last job after five minutes.
+
+We fixed the issue by increasing the shutdownGracePeriod value on the nodes. The default value for us was 30 seconds, which is too low for our use case. We increased it to 120 minutes. That does not mean the node will stay alive for 120 minutes; it will be kept alive until the last pod on the node is terminated.
+
+== Conclusion
+It's crucial to understand the whole setup and to look beyond your horizon. Also, a good user-admin relationship is important, and it improved this case.
+
+== More blogs
+Thanks for reading — again! The next blog will be about Jenkins daily situations, how we handle them, and which "secret" tips I have for you.
